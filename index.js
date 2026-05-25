@@ -15,16 +15,21 @@ const client = new Client({
     intents: [GatewayIntentBits.Guilds]
 });
 
-let connection;
+let connection = null;
 
-async function connectToVoice() {
+process.on('unhandledRejection', console.error);
+process.on('uncaughtException', console.error);
+
+async function connect() {
     try {
         const guild = client.guilds.cache.get(process.env.GUILD_ID);
 
         if (!guild) {
-            console.log('Server niet gevonden.');
+            console.log('Guild niet gevonden');
             return;
         }
+
+        console.log('Joinen van voice kanaal...');
 
         connection = joinVoiceChannel({
             channelId: process.env.CHANNEL_ID,
@@ -34,41 +39,49 @@ async function connectToVoice() {
             selfMute: true
         });
 
-        console.log('Verbonden met voice kanaal.');
+        connection.on('stateChange', async (oldState, newState) => {
+            console.log(`Voice state: ${oldState.status} -> ${newState.status}`);
 
-        connection.on('stateChange', async (_, newState) => {
             if (
-                newState.status === VoiceConnectionStatus.Disconnected
+                newState.status === VoiceConnectionStatus.Disconnected ||
+                newState.status === VoiceConnectionStatus.Destroyed
             ) {
-                console.log('Disconnected. Reconnecten...');
+                console.log('Disconnected. Reconnect over 5 sec...');
 
-                setTimeout(() => {
-                    connectToVoice();
-                }, 5000);
+                try {
+                    connection.destroy();
+                } catch {}
+
+                setTimeout(connect, 5000);
             }
         });
 
         await entersState(
             connection,
             VoiceConnectionStatus.Ready,
-            30000
+            20000
         );
 
-        console.log('Voice verbinding klaar.');
+        console.log('Bot succesvol verbonden.');
 
     } catch (err) {
-        console.error(err);
+        console.error('Connect error:', err);
 
-        setTimeout(() => {
-            connectToVoice();
-        }, 5000);
+        setTimeout(connect, 5000);
     }
 }
 
-client.once('ready', async () => {
+client.once('ready', () => {
     console.log(`Online als ${client.user.tag}`);
 
-    connectToVoice();
+    connect();
+
+    setInterval(() => {
+        if (!connection) {
+            console.log('Geen verbinding. Reconnect...');
+            connect();
+        }
+    }, 30000);
 });
 
 client.login(process.env.TOKEN);
